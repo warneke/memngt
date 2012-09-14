@@ -2,6 +2,7 @@ package edu.berkeley.icsi.memngt.rpc;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -90,9 +91,6 @@ public final class RPCService {
 					it.remove();
 				}
 			}
-
-			System.out.println("Timer");
-
 		}
 	}
 
@@ -101,10 +99,10 @@ public final class RPCService {
 		final Kryo kryo = new Kryo();
 		kryo.register(RPCMessage.class);
 		kryo.register(RPCRequest.class);
-		
+
 		return kryo;
 	}
-	
+
 	public RPCService(final int port) throws IOException {
 
 		this.socket = new DatagramSocket(port);
@@ -137,8 +135,7 @@ public final class RPCService {
 			new RPCInvocationHandler(remoteAddress, protocol.getName()));
 	}
 
-	Object sendRPCRequest(final InetSocketAddress remoteSocketAddress, final RPCRequest request) throws IOException,
-			InterruptedException {
+	Object sendRPCRequest(final InetSocketAddress remoteSocketAddress, final RPCRequest request) throws Throwable {
 
 		if (this.shutdownRequested.get()) {
 			throw new IOException("Shutdown of RPC service has already been requested");
@@ -169,7 +166,11 @@ public final class RPCService {
 			// Send clean up message
 			this.senderThread.sendMessage(remoteSocketAddress, new RPCCleanup(request.getRequestID()));
 
-			return rpcResponse.getRetVal();
+			if (rpcResponse instanceof RPCReturnValue) {
+				return ((RPCReturnValue) rpcResponse).getRetVal();
+			}
+
+			throw ((RPCException) rpcResponse).getException();
 		}
 	}
 
@@ -221,16 +222,18 @@ public final class RPCService {
 			return;
 		}
 
-		Object retVal = null;
+		RPCResponse rpcResponse = null;
 		try {
-			retVal = method.invoke(callbackHandler, rpcRequest.getArgs());
+			final Object retVal = method.invoke(callbackHandler, rpcRequest.getArgs());
+			rpcResponse = new RPCReturnValue(rpcRequest.getRequestID(), retVal);
+		} catch (InvocationTargetException ite) {
+			rpcResponse = new RPCException(rpcRequest.getRequestID(), ite.getTargetException());
 		} catch (Exception e) {
 			e.printStackTrace();
 			Log.error("Error while processing incoming RPC request: ", e);
 			return;
 		}
 
-		final RPCResponse rpcResponse = new RPCResponse(rpcRequest.getRequestID(), retVal);
 		this.cachedResponses.put(requestID, new CachedResponse(System.currentTimeMillis(), rpcResponse));
 		this.senderThread.sendMessage(remoteSocketAddress, rpcResponse);
 	}
