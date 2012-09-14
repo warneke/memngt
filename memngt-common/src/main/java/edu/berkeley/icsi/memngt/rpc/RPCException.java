@@ -1,22 +1,22 @@
 package edu.berkeley.icsi.memngt.rpc;
 
-final class RPCException extends RPCResponse {
+final class RPCThrowable extends RPCResponse {
 
-	private final Throwable exception;
+	private final Throwable throwable;
 
-	RPCException(final int requestID, final Throwable exception) {
+	RPCThrowable(final int requestID, final Throwable throwable) {
 		super(requestID);
 
-		this.exception = exception;
+		this.throwable = throwable;
 	}
 
-	RPCException() {
+	RPCThrowable() {
 		super(0);
 
-		this.exception = null;
+		this.throwable = null;
 	}
 
-	Throwable getException() {
-		return this.exception;
+	Throwable getThrowable() {
+		return this.throwable;
 	}
 }

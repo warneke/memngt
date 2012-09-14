@@ -170,7 +170,7 @@ public final class RPCService {
 				return ((RPCReturnValue) rpcResponse).getRetVal();
 			}
 
-			throw ((RPCException) rpcResponse).getException();
+			throw ((RPCThrowable) rpcResponse).getThrowable();
 		}
 	}
 
@@ -227,7 +227,7 @@ public final class RPCService {
 			final Object retVal = method.invoke(callbackHandler, rpcRequest.getArgs());
 			rpcResponse = new RPCReturnValue(rpcRequest.getRequestID(), retVal);
 		} catch (InvocationTargetException ite) {
-			rpcResponse = new RPCException(rpcRequest.getRequestID(), ite.getTargetException());
+			rpcResponse = new RPCThrowable(rpcRequest.getRequestID(), ite.getTargetException());
 		} catch (Exception e) {
 			e.printStackTrace();
 			Log.error("Error while processing incoming RPC request: ", e);
