@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.minlog.Log;
 
-import edu.berkeley.icsi.memngt.protocols.Protocol;
 
 public final class RPCService {
 
@@ -34,7 +33,7 @@ public final class RPCService {
 
 	private final Timer cleanupTimer = new Timer();
 
-	private final ConcurrentHashMap<String, Protocol> callbackHandlers = new ConcurrentHashMap<String, Protocol>();
+	private final ConcurrentHashMap<String, RPCProtocol> callbackHandlers = new ConcurrentHashMap<String, RPCProtocol>();
 
 	private final ConcurrentHashMap<Integer, RPCRequest> pendingRequests = new ConcurrentHashMap<Integer, RPCRequest>();
 
@@ -117,7 +116,7 @@ public final class RPCService {
 
 	}
 
-	public void setProtocolCallbackHandler(final Class<? extends Protocol> protocol, final Protocol callbackHandler) {
+	public void setProtocolCallbackHandler(final Class<? extends RPCProtocol> protocol, final RPCProtocol callbackHandler) {
 
 		if (this.callbackHandlers.putIfAbsent(protocol.getName(), callbackHandler) != null) {
 			Log.error("There is already a protocol call back handler set for protocol " + protocol.getName());
@@ -126,7 +125,7 @@ public final class RPCService {
 	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends Protocol> T getProxy(final InetSocketAddress remoteAddress, Class<T> protocol)
+	public <T extends RPCProtocol> T getProxy(final InetSocketAddress remoteAddress, Class<T> protocol)
 			throws IOException {
 
 		final Class<?>[] interfaces = new Class<?>[1];
@@ -207,7 +206,7 @@ public final class RPCService {
 			return;
 		}
 
-		final Protocol callbackHandler = this.callbackHandlers.get(rpcRequest.getInterfaceName());
+		final RPCProtocol callbackHandler = this.callbackHandlers.get(rpcRequest.getInterfaceName());
 		if (callbackHandler == null) {
 			Log.error("Cannot find callback handler for protocol " + rpcRequest.getInterfaceName());
 			return;
@@ -257,5 +256,10 @@ public final class RPCService {
 	void processIncomingRPCCleanup(final InetSocketAddress remoteSocketAddress, final RPCCleanup rpcCleanup) {
 
 		this.cachedResponses.remove(Integer.valueOf(rpcCleanup.getRequestID()));
+	}
+
+	public int getRPCPort() {
+
+		return this.socket.getPort();
 	}
 }
