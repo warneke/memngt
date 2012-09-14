@@ -16,18 +16,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.minlog.Log;
 
-
 public final class RPCService {
 
 	private static final int TIMEOUT = 100;
 
 	private static final int CLEANUP_INTERVAL = 10000;
 
+	private final int rpcPort;
+
+	private final DatagramSocket socket;
+
 	private final SenderThread senderThread;
 
 	private final ReceiverThread receiverThread;
-
-	private final DatagramSocket socket;
 
 	private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
 
@@ -102,9 +103,11 @@ public final class RPCService {
 		return kryo;
 	}
 
-	public RPCService(final int port) throws IOException {
+	public RPCService(final int rpcPort) throws IOException {
 
-		this.socket = new DatagramSocket(port);
+		this.rpcPort = rpcPort;
+
+		this.socket = new DatagramSocket(rpcPort);
 
 		this.senderThread = new SenderThread(this.socket);
 		this.senderThread.start();
@@ -116,7 +119,8 @@ public final class RPCService {
 
 	}
 
-	public void setProtocolCallbackHandler(final Class<? extends RPCProtocol> protocol, final RPCProtocol callbackHandler) {
+	public void setProtocolCallbackHandler(final Class<? extends RPCProtocol> protocol,
+			final RPCProtocol callbackHandler) {
 
 		if (this.callbackHandlers.putIfAbsent(protocol.getName(), callbackHandler) != null) {
 			Log.error("There is already a protocol call back handler set for protocol " + protocol.getName());
@@ -260,6 +264,6 @@ public final class RPCService {
 
 	public int getRPCPort() {
 
-		return this.socket.getPort();
+		return this.rpcPort;
 	}
 }
