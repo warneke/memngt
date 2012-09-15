@@ -183,21 +183,25 @@ public final class RPCService {
 			return;
 		}
 
+		// Request shutdown of sender and receiver thread
+		this.senderThread.requestShutdown();
+		this.receiverThread.requestShutdown();
+
+		this.socket.close();
+
 		try {
-			this.senderThread.shutDown();
+			this.senderThread.join();
 		} catch (InterruptedException ie) {
 			Log.debug("Caught exception while waiting for sender thread to shut down: ", ie);
 		}
 
 		try {
-			this.receiverThread.shutDown();
+			this.receiverThread.join();
 		} catch (InterruptedException ie) {
 			Log.debug("Caught exception while waiting for receiver thread to shut down: ", ie);
 		}
 
 		this.cleanupTimer.cancel();
-
-		this.socket.close();
 	}
 
 	void processIncomingRPCRequest(final InetSocketAddress remoteSocketAddress, final RPCRequest rpcRequest)

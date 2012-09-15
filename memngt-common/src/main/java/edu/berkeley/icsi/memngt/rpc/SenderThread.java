@@ -22,7 +22,7 @@ final class SenderThread extends Thread {
 
 		private final RPCMessage rpcMessage;
 
-		private SendingRequest(final InetSocketAddress remoteSocketAddress, RPCMessage rpcMessage) {
+		private SendingRequest(final InetSocketAddress remoteSocketAddress, final RPCMessage rpcMessage) {
 			this.remoteSocketAddress = remoteSocketAddress;
 			this.rpcMessage = rpcMessage;
 		}
@@ -31,6 +31,8 @@ final class SenderThread extends Thread {
 	private final ArrayBlockingQueue<SendingRequest> msgQueue = new ArrayBlockingQueue<SendingRequest>(128);
 
 	SenderThread(final DatagramSocket socket) {
+		super("RPC Sender Thread");
+
 		this.socket = socket;
 	}
 
@@ -66,7 +68,8 @@ final class SenderThread extends Thread {
 			try {
 				this.socket.send(datagramPacket);
 			} catch (IOException ioe) {
-				Log.error("Sending thread experienced IOException: ", ioe);
+				Log.error("Shutting down sender thread due to error: ", ioe);
+				return;
 			}
 		}
 
@@ -78,11 +81,9 @@ final class SenderThread extends Thread {
 		this.msgQueue.put(new SendingRequest(remoteSocketAddress, rpcMessage));
 	}
 
-	void shutDown() throws InterruptedException {
+	void requestShutdown() {
 
 		this.shutdownRequested = true;
 		interrupt();
-
-		join();
 	}
 }

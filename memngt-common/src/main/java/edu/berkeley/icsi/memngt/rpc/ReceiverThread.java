@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
@@ -18,6 +19,8 @@ final class ReceiverThread extends Thread {
 	private volatile boolean shutdownRequested = false;
 
 	ReceiverThread(final RPCService rpcService, final DatagramSocket socket) {
+		super("RPC Receiver Thread");
+
 		this.rpcService = rpcService;
 		this.socket = socket;
 	}
@@ -33,9 +36,15 @@ final class ReceiverThread extends Thread {
 
 			try {
 				this.socket.receive(dp);
+			} catch (SocketException se) {
+				if (this.shutdownRequested) {
+					return;
+				}
+				Log.error("Shutting down receiver thread due to error: ", se);
+				return;
 			} catch (IOException ioe) {
-				Log.error("Error receiving UDP message: ", ioe);
-				continue;
+				Log.error("Shutting down receiver thread due to error: ", ioe);
+				return;
 			}
 
 			final InetSocketAddress remoteSocketAddress = (InetSocketAddress) dp.getSocketAddress();
@@ -69,11 +78,9 @@ final class ReceiverThread extends Thread {
 
 	}
 
-	void shutDown() throws InterruptedException {
+	void requestShutdown() {
 
 		this.shutdownRequested = true;
 		interrupt();
-
-		join();
 	}
 }
