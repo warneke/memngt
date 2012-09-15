@@ -70,7 +70,7 @@ public final class RPCService {
 		@Override
 		public Object invoke(final Object proxy, final Method method, final Object[] args) throws Throwable {
 
-			final int requestID = (int) (Math.random() * (double) Integer.MAX_VALUE);
+			final int requestID = Integer.MIN_VALUE + (int) (Math.random() * (double) Integer.MAX_VALUE * 2.0);
 			final RPCRequest rpcRequest = new RPCRequest(requestID, this.interfaceName, method, args);
 
 			return sendRPCRequest(this.remoteSocketAddress, rpcRequest);
