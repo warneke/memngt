@@ -2,8 +2,9 @@ package edu.berkeley.icsi.memngt.daemon;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.HashMap;
 import java.util.Iterator;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 import com.esotericsoftware.minlog.Log;
 
@@ -20,35 +21,71 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private final RPCService rpcService;
 
-	private final ConcurrentHashMap<Integer, ClientProcess> clientProcesses = new ConcurrentHashMap<Integer, ClientProcess>();
+	private final Map<Integer, ClientProcess> clientProcesses = new HashMap<Integer, ClientProcess>();
 
 	private Daemon(final int rpcPort) throws IOException {
 
 		this.rpcService = new RPCService(rpcPort);
 		this.rpcService.setProtocolCallbackHandler(
 			ClientToDaemonProtocol.class, this);
+
+		Log.info("Started local memory negotiator daemon on port " + rpcPort);
 	}
 
-	private void runMainLoop() {
+	private void reenforceGrantedMemoryShares() {
 
 		while (true) {
 
-			final Iterator<ClientProcess> it = this.clientProcesses.values().iterator();
-			while (it.hasNext()) {
+			synchronized (this) {
 
-				final ClientProcess clientProcess = it.next();
-				final int physicalMemorySize = clientProcess.getPhysicalMemorySize();
-				if (physicalMemorySize == -1) {
-					it.remove();
-					continue;
-				}
-				final int excessMemoryShare = physicalMemorySize - clientProcess.getCurrentlyGrantedMemoryShare();
-				if (excessMemoryShare < 0) {
-					// Client process does exceed its granted share
-					continue;
-				}
+				final Iterator<ClientProcess> it = this.clientProcesses.values().iterator();
+				while (it.hasNext()) {
 
-				System.out.println("Physical memory size is " + physicalMemorySize);
+					final ClientProcess clientProcess = it.next();
+					int physicalMemorySize = clientProcess.getPhysicalMemorySize();
+					final int grantedMemoryShare = clientProcess.getGrantedMemoryShare();
+					if (physicalMemorySize == -1) {
+						Log.debug("Cannot find client process " + clientProcess + ", removing it...");
+						it.remove();
+						continue;
+					}
+
+					int excessMemoryShare = physicalMemorySize - grantedMemoryShare;
+					if (excessMemoryShare <= 0) {
+						// Client process does exceed its granted share
+						continue;
+					}
+
+					Log.info(clientProcess + " exceeds its granted memory share by " + excessMemoryShare
+						+ " kilobytes, asking it to relinquish memory...");
+
+					try {
+						clientProcess.grantedMemoryShareChanged(grantedMemoryShare);
+					} catch (IOException ioe) {
+						Log.warn("I/O error while enforcing the memory share for " + clientProcess
+							+ ", killing process...", ioe);
+						kill(clientProcess);
+						it.remove();
+						continue;
+					}
+
+					physicalMemorySize = clientProcess.getPhysicalMemorySize();
+					if (physicalMemorySize == -1) {
+						Log.debug("Cannot find client process " + clientProcess + ", removing it...");
+						it.remove();
+						continue;
+					}
+
+					excessMemoryShare = physicalMemorySize - grantedMemoryShare;
+					if (excessMemoryShare > 0) {
+						Log.info(clientProcess + " still exceeds its granted memory share by " + excessMemoryShare
+							+ " kilobytes, killing it...");
+						kill(clientProcess);
+						it.remove();
+					} else {
+						Log.info(clientProcess + " reduced its physical memory consumption to " + physicalMemorySize);
+					}
+				}
 			}
 
 			try {
@@ -58,6 +95,15 @@ public final class Daemon implements ClientToDaemonProtocol {
 			}
 		}
 
+	}
+
+	private static void kill(final ClientProcess client) {
+
+		try {
+			client.kill();
+		} catch (IOException ioe) {
+			Log.error("Cannot kill " + client + ": ", ioe);
+		}
 	}
 
 	private void shutDown() {
@@ -81,7 +127,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 			return;
 		}
 
-		daemon.runMainLoop();
+		daemon.reenforceGrantedMemoryShares();
 
 		daemon.shutDown();
 	}
@@ -90,7 +136,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public int registerClient(final String clientName, final int clientPID, final int clientRPCPort)
+	public synchronized int registerClient(final String clientName, final int clientPID, final int clientRPCPort)
 			throws RegistrationException {
 
 		Log.debug("Client registration request from " + clientName + ", PID " + clientPID + ", RPC port "
@@ -102,7 +148,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		ClientProcess clientProcess = this.clientProcesses.get(pid);
 		if (clientProcess != null) {
 			Log.warn("Client with PID " + clientPID + " is already registered");
-			return clientProcess.getGuaranteedMemoryShare();
+			return clientProcess.getGrantedMemoryShare();
 		}
 
 		// Verify we are actually talking to the right process
@@ -124,11 +170,11 @@ public final class Daemon implements ClientToDaemonProtocol {
 		clientProcess = new ClientProcess(clientName, clientPID, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
 			Utils.getFreePhysicalMemory()));
 
-		final ClientProcess oldVal = this.clientProcesses.putIfAbsent(pid, clientProcess);
-		if (oldVal != null) {
-			return oldVal.getGuaranteedMemoryShare();
-		}
+		this.clientProcesses.put(pid, clientProcess);
 
-		return clientProcess.getGuaranteedMemoryShare();
+		Log.info("Successfully registered new client process " + clientProcess + " with "
+			+ clientProcess.getGrantedMemoryShare() + " kilobytes of granted memory");
+
+		return clientProcess.getGrantedMemoryShare();
 	}
 }

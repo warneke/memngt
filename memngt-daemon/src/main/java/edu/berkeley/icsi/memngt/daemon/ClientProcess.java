@@ -1,5 +1,7 @@
 package edu.berkeley.icsi.memngt.daemon;
 
+import java.io.IOException;
+
 import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
 import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
@@ -13,7 +15,7 @@ final class ClientProcess implements DaemonToClientProtocol {
 
 	private final int guaranteedMemoryShare;
 
-	private volatile int currentlyGrantedMemoryShare;
+	private int grantedMemoryShare;
 
 	ClientProcess(final String name, final int pid, final DaemonToClientProtocol rpcProxy,
 			final int guaranteedMemoryShare) {
@@ -21,7 +23,7 @@ final class ClientProcess implements DaemonToClientProtocol {
 		this.pid = pid;
 		this.rpcProxy = rpcProxy;
 		this.guaranteedMemoryShare = guaranteedMemoryShare;
-		this.currentlyGrantedMemoryShare = guaranteedMemoryShare;
+		this.grantedMemoryShare = guaranteedMemoryShare;
 	}
 
 	String getName() {
@@ -32,18 +34,32 @@ final class ClientProcess implements DaemonToClientProtocol {
 		return this.pid;
 	}
 
+	int getGrantedMemoryShare() {
+		return this.grantedMemoryShare;
+	}
+
 	int getPhysicalMemorySize() {
 		return ClientUtils.getPhysicalMemorySize(this.pid);
 	}
 
-	int getGuaranteedMemoryShare() {
-
-		return this.guaranteedMemoryShare;
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public String toString() {
+		return this.name + " (" + this.pid + ")";
 	}
 
-	int getCurrentlyGrantedMemoryShare() {
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public void grantedMemoryShareChanged(final int sizeOfNewShare) throws IOException {
+		this.rpcProxy.grantedMemoryShareChanged(sizeOfNewShare);
+	}
 
-		return this.currentlyGrantedMemoryShare;
+	void kill() throws IOException {
+		Runtime.getRuntime().exec("kill -9 " + this.pid);
 	}
 
 }
