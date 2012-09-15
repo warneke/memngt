@@ -18,7 +18,9 @@ import com.esotericsoftware.minlog.Log;
 
 public final class RPCService {
 
-	private static final int TIMEOUT = 100;
+	private static final int TIMEOUT = 500;
+
+	private static final int RETRY_LIMIT = 10;
 
 	private static final int CLEANUP_INTERVAL = 10000;
 
@@ -148,7 +150,7 @@ public final class RPCService {
 
 		this.pendingRequests.put(requestID, request);
 
-		while (true) {
+		for (int i = 0; i < RETRY_LIMIT; ++i) {
 
 			this.senderThread.sendMessage(remoteSocketAddress, request);
 
@@ -175,6 +177,11 @@ public final class RPCService {
 
 			throw ((RPCThrowable) rpcResponse).getThrowable();
 		}
+
+		this.pendingRequests.remove(requestID);
+
+		throw new IOException("Unable to complete RPC of method " + request.getMethodName() + " on "
+			+ remoteSocketAddress);
 	}
 
 	public void shutDown() {
