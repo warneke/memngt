@@ -18,11 +18,11 @@ import com.esotericsoftware.minlog.Log;
 
 public final class RPCService {
 
-	private static final int TIMEOUT = 500;
+	private static final int TIMEOUT = 1000;
 
 	private static final int RETRY_LIMIT = 10;
 
-	private static final int CLEANUP_INTERVAL = 10000;
+	private static final int CLEANUP_INTERVAL = 20000;
 
 	private final int rpcPort;
 

@@ -45,7 +45,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 					int physicalMemorySize = clientProcess.getPhysicalMemorySize();
 					final int grantedMemoryShare = clientProcess.getGrantedMemoryShare();
 					if (physicalMemorySize == -1) {
-						Log.debug("Cannot find client process " + clientProcess + ", removing it...");
+						Log.info("Cannot find client process " + clientProcess + ", removing it...");
 						it.remove();
 						continue;
 					}
@@ -71,7 +71,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 					physicalMemorySize = clientProcess.getPhysicalMemorySize();
 					if (physicalMemorySize == -1) {
-						Log.debug("Cannot find client process " + clientProcess + ", removing it...");
+						Log.info("Cannot find client process " + clientProcess + ", removing it...");
 						it.remove();
 						continue;
 					}
