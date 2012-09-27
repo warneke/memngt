@@ -17,7 +17,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private final static int UPDATE_INTERVAL = 1000;
 
-	private final static int MINIMUM_CLIENT_MEMORY = 128 * 1024;
+	private final static int MINIMUM_CLIENT_MEMORY = 256 * 1024;
 
 	private final RPCService rpcService;
 
