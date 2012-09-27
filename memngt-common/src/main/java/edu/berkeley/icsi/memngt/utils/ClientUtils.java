@@ -5,6 +5,10 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryPoolMXBean;
+import java.lang.management.MemoryUsage;
+import java.util.Iterator;
+import java.util.List;
 
 import com.esotericsoftware.minlog.Log;
 
@@ -82,5 +86,41 @@ public final class ClientUtils {
 				}
 			}
 		}
+	}
+
+	public static void dumpMemoryUtilization() {
+
+		System.out.println("-------- Memory Pools --------");
+		final List<MemoryPoolMXBean> mpList = ManagementFactory.getMemoryPoolMXBeans();
+		final Iterator<MemoryPoolMXBean> mpIt = mpList.iterator();
+		final StringBuilder sb = new StringBuilder();
+		while (mpIt.hasNext()) {
+			final MemoryPoolMXBean mp = mpIt.next();
+			sb.append(mp.getName());
+			sb.append(" (");
+			sb.append(mp.getType());
+			sb.append(") :\t");
+
+			final MemoryUsage mu = mp.getUsage();
+			final long init = mu.getInit();
+			final long used = mu.getUsed();
+			final long committed = mu.getCommitted();
+			final long max = mu.getMax();
+
+			sb.append(byteToMegaByte(init));
+			sb.append(" MB init,\t");
+			sb.append(byteToMegaByte(used));
+			sb.append(" MB used,\t");
+			sb.append(byteToMegaByte(committed));
+			sb.append(" MB committed,\t");
+			sb.append(byteToMegaByte(max));
+			sb.append(" MB max\n");
+		}
+		System.out.println(sb.toString());
+	}
+
+	private static int byteToMegaByte(final long val) {
+
+		return (int) (val / 1048576L);
 	}
 }
