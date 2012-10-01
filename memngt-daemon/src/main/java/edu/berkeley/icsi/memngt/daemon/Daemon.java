@@ -10,14 +10,20 @@ import com.esotericsoftware.minlog.Log;
 
 import edu.berkeley.icsi.memngt.protocols.ClientToDaemonProtocol;
 import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
-import edu.berkeley.icsi.memngt.protocols.RegistrationException;
+import edu.berkeley.icsi.memngt.protocols.NegotiationException;
 import edu.berkeley.icsi.memngt.rpc.RPCService;
 
 public final class Daemon implements ClientToDaemonProtocol {
 
-	private final static int UPDATE_INTERVAL = 1000;
+	private static final int UPDATE_INTERVAL = 1000;
 
-	private final static int MINIMUM_CLIENT_MEMORY = 256 * 1024;
+	private static final int MINIMUM_CLIENT_MEMORY = 512 * 1024;
+
+	/**
+	 * The fraction by which a client process may exceed its granted memory share before the memory negotiator daemon
+	 * interferes.
+	 */
+	private static final float GRACE_MARGIN = 0.1f;
 
 	private final RPCService rpcService;
 
@@ -44,13 +50,14 @@ public final class Daemon implements ClientToDaemonProtocol {
 					final ClientProcess clientProcess = it.next();
 					int physicalMemorySize = clientProcess.getPhysicalMemorySize();
 					final int grantedMemoryShare = clientProcess.getGrantedMemoryShare();
+					final int grantedMemoryShareWithGraceMargin = addGraceMargin(grantedMemoryShare);
 					if (physicalMemorySize == -1) {
 						Log.info("Cannot find client process " + clientProcess + ", removing it...");
 						it.remove();
 						continue;
 					}
 
-					int excessMemoryShare = physicalMemorySize - grantedMemoryShare;
+					int excessMemoryShare = physicalMemorySize - grantedMemoryShareWithGraceMargin;
 					if (excessMemoryShare <= 0) {
 						// Client process does exceed its granted share
 						continue;
@@ -137,7 +144,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 	 */
 	@Override
 	public synchronized int registerClient(final String clientName, final int clientPID, final int clientRPCPort)
-			throws RegistrationException {
+			throws NegotiationException {
 
 		Log.debug("Client registration request from " + clientName + ", PID " + clientPID + ", RPC port "
 			+ clientRPCPort);
@@ -153,7 +160,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 		// Verify we are actually talking to the right process
 		if (!Utils.verifyPortBinding(clientPID, clientRPCPort)) {
-			throw new RegistrationException("Could not verify binding between process ID " + clientPID
+			throw new NegotiationException("Could not verify binding between process ID " + clientPID
 				+ " and RPC port " + clientRPCPort);
 		}
 
@@ -164,11 +171,11 @@ public final class Daemon implements ClientToDaemonProtocol {
 		} catch (IOException ioe) {
 			final String errorMsg = "Unable to create RPC proxy for client " + clientPID;
 			Log.error(errorMsg, ioe);
-			throw new RegistrationException(errorMsg);
+			throw new NegotiationException(errorMsg);
 		}
 
 		clientProcess = new ClientProcess(clientName, clientPID, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
-			Utils.getFreePhysicalMemory()));
+			substraceGraceMargin(Utils.getFreePhysicalMemory())));
 
 		this.clientProcesses.put(pid, clientProcess);
 
@@ -176,5 +183,43 @@ public final class Daemon implements ClientToDaemonProtocol {
 			+ clientProcess.getGrantedMemoryShare() + " kilobytes of granted memory");
 
 		return clientProcess.getGrantedMemoryShare();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public synchronized boolean requestAdditionalMemory(final int clientPID, final int amountOfMemory)
+			throws IOException {
+
+		Log.debug("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
+
+		final Integer pid = Integer.valueOf(clientPID);
+		final ClientProcess clientProcess = this.clientProcesses.get(pid);
+
+		if (amountOfMemory < substraceGraceMargin(Utils.getFreePhysicalMemory())) {
+			clientProcess.increaseGrantedMemoryShare(amountOfMemory);
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public synchronized void relinquishMemory(final int clientPID, final int amountOfMemory) throws IOException {
+
+	}
+
+	private static int addGraceMargin(final int amountOfMemory) {
+
+		return amountOfMemory + Math.round((float) amountOfMemory * GRACE_MARGIN);
+	}
+
+	private static int substraceGraceMargin(final int amountOfMemory) {
+
+		return amountOfMemory - Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}
 }

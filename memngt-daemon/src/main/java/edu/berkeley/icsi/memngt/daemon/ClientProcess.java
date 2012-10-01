@@ -38,6 +38,10 @@ final class ClientProcess implements DaemonToClientProtocol {
 		return this.grantedMemoryShare;
 	}
 
+	void increaseGrantedMemoryShare(final int amountOfAdditionalMemory) {
+		this.grantedMemoryShare += amountOfAdditionalMemory;
+	}
+
 	int getPhysicalMemorySize() {
 		return ClientUtils.getPhysicalMemorySize(this.pid);
 	}
