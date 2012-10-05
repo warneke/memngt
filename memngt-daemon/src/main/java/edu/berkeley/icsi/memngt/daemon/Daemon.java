@@ -5,12 +5,15 @@ import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Queue;
 
 import com.esotericsoftware.minlog.Log;
 
 import edu.berkeley.icsi.memngt.protocols.ClientToDaemonProtocol;
 import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
 import edu.berkeley.icsi.memngt.protocols.NegotiationException;
+import edu.berkeley.icsi.memngt.protocols.ProcessType;
 import edu.berkeley.icsi.memngt.rpc.RPCService;
 
 public final class Daemon implements ClientToDaemonProtocol {
@@ -29,6 +32,10 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private final Map<Integer, ClientProcess> clientProcesses = new HashMap<Integer, ClientProcess>();
 
+	private final Queue<ClientProcess> userProcesses = new PriorityQueue<ClientProcess>();
+
+	private final Queue<ClientProcess> infrastructureProcesses = new PriorityQueue<ClientProcess>();
+
 	private Daemon(final int rpcPort) throws IOException {
 
 		this.rpcService = new RPCService(rpcPort);
@@ -40,60 +47,87 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private void reenforceGrantedMemoryShares() {
 
-		while (true) {
+		synchronized (this) {
 
-			synchronized (this) {
+			final Iterator<ClientProcess> it = this.clientProcesses.values().iterator();
+			while (it.hasNext()) {
 
-				final Iterator<ClientProcess> it = this.clientProcesses.values().iterator();
-				while (it.hasNext()) {
+				final ClientProcess clientProcess = it.next();
+				int physicalMemorySize = clientProcess.getPhysicalMemorySize();
+				final int grantedMemoryShare = clientProcess.getGrantedMemoryShare();
+				final int grantedMemoryShareWithGraceMargin = addGraceMargin(grantedMemoryShare);
+				if (physicalMemorySize == -1) {
+					Log.info("Cannot find client process " + clientProcess + ", removing it...");
+					it.remove();
+					removeFromPriorityQueue(clientProcess);
+					continue;
+				}
 
-					final ClientProcess clientProcess = it.next();
-					int physicalMemorySize = clientProcess.getPhysicalMemorySize();
-					final int grantedMemoryShare = clientProcess.getGrantedMemoryShare();
-					final int grantedMemoryShareWithGraceMargin = addGraceMargin(grantedMemoryShare);
-					if (physicalMemorySize == -1) {
-						Log.info("Cannot find client process " + clientProcess + ", removing it...");
-						it.remove();
-						continue;
-					}
+				int excessMemoryShare = physicalMemorySize - grantedMemoryShareWithGraceMargin;
+				if (excessMemoryShare <= 0) {
+					// Client process does exceed its granted share
+					continue;
+				}
 
-					int excessMemoryShare = physicalMemorySize - grantedMemoryShareWithGraceMargin;
-					if (excessMemoryShare <= 0) {
-						// Client process does exceed its granted share
-						continue;
-					}
+				Log.info(clientProcess + " exceeds its granted memory share by " + excessMemoryShare
+					+ " kilobytes, asking it to relinquish memory...");
 
-					Log.info(clientProcess + " exceeds its granted memory share by " + excessMemoryShare
-						+ " kilobytes, asking it to relinquish memory...");
+				try {
+					clientProcess.grantedMemoryShareChanged(grantedMemoryShare);
+				} catch (IOException ioe) {
+					Log.warn("I/O error while enforcing the memory share for " + clientProcess
+						+ ", killing process...", ioe);
+					kill(clientProcess);
+					it.remove();
+					removeFromPriorityQueue(clientProcess);
+					continue;
+				}
 
-					try {
-						clientProcess.grantedMemoryShareChanged(grantedMemoryShare);
-					} catch (IOException ioe) {
-						Log.warn("I/O error while enforcing the memory share for " + clientProcess
-							+ ", killing process...", ioe);
-						kill(clientProcess);
-						it.remove();
-						continue;
-					}
+				physicalMemorySize = clientProcess.getPhysicalMemorySize();
+				if (physicalMemorySize == -1) {
+					Log.info("Cannot find client process " + clientProcess + ", removing it...");
+					it.remove();
+					removeFromPriorityQueue(clientProcess);
+					continue;
+				}
 
-					physicalMemorySize = clientProcess.getPhysicalMemorySize();
-					if (physicalMemorySize == -1) {
-						Log.info("Cannot find client process " + clientProcess + ", removing it...");
-						it.remove();
-						continue;
-					}
-
-					excessMemoryShare = physicalMemorySize - grantedMemoryShare;
-					if (excessMemoryShare > 0) {
-						Log.info(clientProcess + " still exceeds its granted memory share by " + excessMemoryShare
-							+ " kilobytes, killing it...");
-						kill(clientProcess);
-						it.remove();
-					} else {
-						Log.info(clientProcess + " reduced its physical memory consumption to " + physicalMemorySize);
-					}
+				excessMemoryShare = physicalMemorySize - grantedMemoryShare;
+				if (excessMemoryShare > 0) {
+					Log.info(clientProcess + " still exceeds its granted memory share by " + excessMemoryShare
+						+ " kilobytes, killing it...");
+					kill(clientProcess);
+					it.remove();
+					removeFromPriorityQueue(clientProcess);
+				} else {
+					Log.info(clientProcess + " reduced its physical memory consumption to " + physicalMemorySize);
 				}
 			}
+		}
+	}
+
+	private void redistributeFreeMemory() {
+
+		synchronized (this) {
+
+			final Iterator<ClientProcess> it = this.infrastructureProcesses.iterator();
+
+			int freeMemory = subtraceGraceMargin(Utils.getFreePhysicalMemory());
+
+			while (it.hasNext()) {
+
+				final ClientProcess clientProcess = it.next();
+
+			}
+		}
+
+	}
+
+	private void runMainLoop() {
+
+		while (true) {
+
+			reenforceGrantedMemoryShares();
+			redistributeFreeMemory();
 
 			try {
 				Thread.sleep(UPDATE_INTERVAL);
@@ -101,7 +135,29 @@ public final class Daemon implements ClientToDaemonProtocol {
 				return;
 			}
 		}
+	}
 
+	private void addToPriorityQueue(final ClientProcess clientProcess) {
+
+		if (clientProcess.getType() == ProcessType.USER_PROCESS) {
+			this.userProcesses.add(clientProcess);
+		} else {
+			this.infrastructureProcesses.add(clientProcess);
+		}
+	}
+
+	private void removeFromPriorityQueue(final ClientProcess clientProcess) {
+
+		Queue<ClientProcess> queueToRemoveFrom;
+		if (clientProcess.getType() == ProcessType.USER_PROCESS) {
+			queueToRemoveFrom = this.userProcesses;
+		} else {
+			queueToRemoveFrom = this.infrastructureProcesses;
+		}
+
+		if (!queueToRemoveFrom.remove(clientProcess)) {
+			Log.debug("Cloud not find client process " + clientProcess + " to remove it from priority queue");
+		}
 	}
 
 	private static void kill(final ClientProcess client) {
@@ -134,7 +190,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 			return;
 		}
 
-		daemon.reenforceGrantedMemoryShares();
+		daemon.runMainLoop();
 
 		daemon.shutDown();
 	}
@@ -143,8 +199,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public synchronized int registerClient(final String clientName, final int clientPID, final int clientRPCPort)
-			throws NegotiationException {
+	public synchronized int registerClient(final String clientName, final int clientPID, final int clientRPCPort,
+			final ProcessType type) throws NegotiationException {
 
 		Log.debug("Client registration request from " + clientName + ", PID " + clientPID + ", RPC port "
 			+ clientRPCPort);
@@ -174,10 +230,11 @@ public final class Daemon implements ClientToDaemonProtocol {
 			throw new NegotiationException(errorMsg);
 		}
 
-		clientProcess = new ClientProcess(clientName, clientPID, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
-			substraceGraceMargin(Utils.getFreePhysicalMemory())));
+		clientProcess = new ClientProcess(clientName, clientPID, type, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
+			subtraceGraceMargin(Utils.getFreePhysicalMemory())));
 
 		this.clientProcesses.put(pid, clientProcess);
+		addToPriorityQueue(clientProcess);
 
 		Log.info("Successfully registered new client process " + clientProcess + " with "
 			+ clientProcess.getGrantedMemoryShare() + " kilobytes of granted memory");
@@ -197,7 +254,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		final Integer pid = Integer.valueOf(clientPID);
 		final ClientProcess clientProcess = this.clientProcesses.get(pid);
 
-		if (amountOfMemory < substraceGraceMargin(Utils.getFreePhysicalMemory())) {
+		if (amountOfMemory < subtraceGraceMargin(Utils.getFreePhysicalMemory())) {
 			clientProcess.increaseGrantedMemoryShare(amountOfMemory);
 			return true;
 		}
@@ -211,6 +268,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 	@Override
 	public synchronized void relinquishMemory(final int clientPID, final int amountOfMemory) throws IOException {
 
+		// TODO: Implement me
 	}
 
 	private static int addGraceMargin(final int amountOfMemory) {
@@ -218,7 +276,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		return amountOfMemory + Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}
 
-	private static int substraceGraceMargin(final int amountOfMemory) {
+	private static int subtraceGraceMargin(final int amountOfMemory) {
 
 		return amountOfMemory - Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}

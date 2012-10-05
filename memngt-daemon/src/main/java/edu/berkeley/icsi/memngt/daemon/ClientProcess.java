@@ -3,13 +3,18 @@ package edu.berkeley.icsi.memngt.daemon;
 import java.io.IOException;
 
 import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
+import edu.berkeley.icsi.memngt.protocols.ProcessType;
 import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
-final class ClientProcess implements DaemonToClientProtocol {
+final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientProcess> {
 
 	private final String name;
 
 	private final int pid;
+
+	private final ProcessType type;
+
+	private final int priority;
 
 	private final DaemonToClientProtocol rpcProxy;
 
@@ -17,10 +22,13 @@ final class ClientProcess implements DaemonToClientProtocol {
 
 	private int grantedMemoryShare;
 
-	ClientProcess(final String name, final int pid, final DaemonToClientProtocol rpcProxy,
+	ClientProcess(final String name, final int pid, final ProcessType type, final DaemonToClientProtocol rpcProxy,
 			final int guaranteedMemoryShare) {
+
 		this.name = name;
 		this.pid = pid;
+		this.type = type;
+		this.priority = 0;
 		this.rpcProxy = rpcProxy;
 		this.guaranteedMemoryShare = guaranteedMemoryShare;
 		this.grantedMemoryShare = guaranteedMemoryShare;
@@ -32,6 +40,18 @@ final class ClientProcess implements DaemonToClientProtocol {
 
 	int getPID() {
 		return this.pid;
+	}
+
+	ProcessType getType() {
+		return this.type;
+	}
+
+	int getPriority() {
+		return this.priority;
+	}
+
+	int getGuaranteedMemoryShare() {
+		return this.guaranteedMemoryShare;
 	}
 
 	int getGrantedMemoryShare() {
@@ -64,6 +84,28 @@ final class ClientProcess implements DaemonToClientProtocol {
 
 	void kill() throws IOException {
 		Runtime.getRuntime().exec("kill -9 " + this.pid);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public int additionalMemoryOffered(final int amountOfAdditionalMemory) throws IOException {
+
+		if (this.type == ProcessType.USER_PROCESS) {
+			throw new IllegalStateException("Additional memory offered to user process");
+		}
+
+		return this.rpcProxy.additionalMemoryOffered(amountOfAdditionalMemory);
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public int compareTo(final ClientProcess clientProcess) {
+
+		return (this.priority - clientProcess.priority);
 	}
 
 }

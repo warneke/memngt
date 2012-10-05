@@ -15,13 +15,16 @@ public interface ClientToDaemonProtocol extends RPCProtocol {
 	 *        the process ID of the client
 	 * @param clientRPCPort
 	 *        the RPC port the memory negotiator daemon can use to communicate with the client process
+	 * @param type
+	 *        the type of the client process
 	 * @return the initially granted memory share in kilobytes
 	 * @throws NegotiationException
 	 *         thrown if the daemon was unable to successfully complete the registration
 	 * @throws IOException
 	 *         thrown if an I/O error occurred during the RPC call
 	 */
-	int registerClient(String clientName, int clientPID, int clientRPCPort) throws NegotiationException, IOException;
+	int registerClient(String clientName, int clientPID, int clientRPCPort, ProcessType type)
+			throws NegotiationException, IOException;
 
 	/**
 	 * Requests additional main memory for the client process with the given ID.
