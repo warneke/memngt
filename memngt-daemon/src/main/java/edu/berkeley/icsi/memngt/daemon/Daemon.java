@@ -116,6 +116,14 @@ public final class Daemon implements ClientToDaemonProtocol {
 			while (it.hasNext()) {
 
 				final ClientProcess clientProcess = it.next();
+				Log.info("Offering " + freeMemory + " kilobytes of additional memory to " + clientProcess);
+				try {
+					final int acceptedMemory = clientProcess.additionalMemoryOffered(freeMemory);
+				} catch (IOException ioe) {
+					Log.warn("I/O error while offering additional memory to " + clientProcess
+						+ "...", ioe);
+					continue;
+				}
 
 			}
 		}
@@ -184,7 +192,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 		Daemon daemon = null;
 		try {
-			daemon = new Daemon(8000);
+			daemon = new Daemon(8009);
 		} catch (IOException ioe) {
 			Log.error("Could not initialize memory negotiator daemon: ", ioe);
 			return;
