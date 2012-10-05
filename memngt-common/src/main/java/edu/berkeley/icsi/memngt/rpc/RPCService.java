@@ -18,7 +18,7 @@ import com.esotericsoftware.minlog.Log;
 
 public final class RPCService {
 
-	private static final int TIMEOUT = 1000;
+	private static final int TIMEOUT = 2000;
 
 	private static final int RETRY_LIMIT = 10;
 
