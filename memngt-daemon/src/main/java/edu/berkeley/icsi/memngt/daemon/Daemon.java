@@ -15,6 +15,7 @@ import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
 import edu.berkeley.icsi.memngt.protocols.NegotiationException;
 import edu.berkeley.icsi.memngt.protocols.ProcessType;
 import edu.berkeley.icsi.memngt.rpc.RPCService;
+import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
 public final class Daemon implements ClientToDaemonProtocol {
 
@@ -119,6 +120,10 @@ public final class Daemon implements ClientToDaemonProtocol {
 				Log.info("Offering " + freeMemory + " kilobytes of additional memory to " + clientProcess);
 				try {
 					final int acceptedMemory = clientProcess.additionalMemoryOffered(freeMemory);
+					if (acceptedMemory > 0) {
+						Log.info(clientProcess + " accepted " + acceptedMemory + " kilobytes of additional memory");
+						clientProcess.increaseGrantedMemoryShare(acceptedMemory);
+					}
 				} catch (IOException ioe) {
 					Log.warn("I/O error while offering additional memory to " + clientProcess
 						+ "...", ioe);
@@ -184,11 +189,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	public static void main(final String[] args) {
 
-		// Do some initial sanity checks
-		if (Utils.getFreePhysicalMemory() == -1) {
-			Log.error("Cannot determine the amount of free physical memory");
-			return;
-		}
+		// Do some initial compatibility checks
+		ClientUtils.checkCompatibility();
 
 		Daemon daemon = null;
 		try {
