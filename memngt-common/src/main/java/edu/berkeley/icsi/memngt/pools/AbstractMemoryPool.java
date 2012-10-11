@@ -11,7 +11,7 @@ import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
 public abstract class AbstractMemoryPool<T> {
 
-	private static final int ADAPTATION_GRANULARITY = 10 * 1024;
+	private static final int ADAPTATION_GRANULARITY = 4 * 1024;
 
 	private final String name;
 
@@ -46,12 +46,18 @@ public abstract class AbstractMemoryPool<T> {
 	/**
 	 * The granted memory size of the application containing the memory pool in kilobytes.
 	 */
-	private int grantedMemorySize = -1;
+	private final AtomicInteger grantedMemorySize = new AtomicInteger(0);
+
+	/**
+	 * The maximum fraction of the heap that can be used before it is resized by the JVM.
+	 */
+	private final float heapResizeLimit;
 
 	protected AbstractMemoryPool(final String name, final int initialCapacity) {
 		this.name = name;
 		this.pid = ClientUtils.getPID();
 		this.buffers = new ArrayBlockingQueue<T>(initialCapacity);
+		this.heapResizeLimit = (100 - ClientUtils.getMinHeapFreeRatio()) / 100.0f;
 	}
 
 	protected AbstractMemoryPool(final int initialCapacity) {
@@ -59,6 +65,7 @@ public abstract class AbstractMemoryPool<T> {
 		this.name = getDefaultName(pid);
 		this.pid = pid;
 		this.buffers = new ArrayBlockingQueue<T>(initialCapacity);
+		this.heapResizeLimit = (100 - ClientUtils.getMinHeapFreeRatio()) / 100.0f;
 	}
 
 	/**
@@ -73,28 +80,13 @@ public abstract class AbstractMemoryPool<T> {
 	}
 
 	/**
-	 * Sets the granted memory size.
-	 * 
-	 * @param grantedMemorySize
-	 *        the granted memory size in kilobytes
-	 */
-	public void setGrantedMemorySize(final int grantedMemorySize) {
-
-		if (grantedMemorySize <= 0) {
-			throw new IllegalArgumentException("grantedMemorySize must be larger than 0");
-		}
-
-		this.grantedMemorySize = grantedMemorySize;
-	}
-
-	/**
 	 * The granted memory size in kilobytes.
 	 * 
 	 * @return the granted memory size in kilobytes
 	 */
 	public int getGrantedMemorySize() {
 
-		return this.grantedMemorySize;
+		return this.grantedMemorySize.get();
 	}
 
 	/**
@@ -104,7 +96,7 @@ public abstract class AbstractMemoryPool<T> {
 		this.buffers.clear();
 		this.allocatedMemory.set(0);
 		this.availableMemory.set(0);
-		this.grantedMemorySize = -1;
+		this.grantedMemorySize.set(0);
 		this.lowMemoryThreshold = -1;
 		this.lowMemoryListener = null;
 		this.lowMemoryNotificationSent.set(false);
@@ -157,23 +149,36 @@ public abstract class AbstractMemoryPool<T> {
 	/**
 	 * Adjusts the memory pool to the granted memory size.
 	 */
-	public void adjust() {
+	public void increaseGrantedShareAndAdjust(final int delta) {
 
-		if (this.grantedMemorySize < 0) {
-			throw new IllegalStateException("grantedMemorySize is not set");
+		if (delta == 0) {
+			return;
 		}
 
-		int availableMemory = this.availableMemory.get();
+		final long start = System.currentTimeMillis();
+
+		final int grantedMemoryShare = this.grantedMemorySize.addAndGet(delta);
+		if (grantedMemoryShare < 0) {
+			throw new IllegalStateException("grantedMemoryShare is" + grantedMemoryShare);
+		}
+
+		final int reducedGrantedMemorySize = (int) ((float) grantedMemoryShare * this.heapResizeLimit);
+
+		Log.info("Granted memory share is now " + grantedMemoryShare + " kilobytes (reduced "
+			+ reducedGrantedMemorySize + " kilobytes), adjusting...");
+
+		int allocatedBuffers = 0, releasedBuffers = 0;
+
 		synchronized (this.adjustmentLock) {
 
-			final int oldAllocatedMemory = availableMemory;
+			// Allocate memory until the reduced granted memory size is crossed, check every ADAPTATION_GRANULARITY
+			// kilobytes
 
-			int allocatedBuffers = 0;
 			int kilobytesUntilNextCheck = 0;
 			while (true) {
 
 				if (kilobytesUntilNextCheck <= 0) {
-					if (ClientUtils.getPhysicalMemorySize(this.pid) > this.grantedMemorySize) {
+					if (ClientUtils.getPhysicalMemorySize(this.pid) > reducedGrantedMemorySize) {
 						break;
 					}
 					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
@@ -183,64 +188,85 @@ public abstract class AbstractMemoryPool<T> {
 				final int sizeOfBuffer = getSizeOfBuffer(buffer);
 				this.buffers.add(buffer);
 				this.allocatedMemory.addAndGet(sizeOfBuffer);
-				availableMemory = this.availableMemory.addAndGet(sizeOfBuffer);
+				this.availableMemory.addAndGet(sizeOfBuffer);
 				kilobytesUntilNextCheck -= sizeOfBuffer;
 				++allocatedBuffers;
 			}
 
-			int excessMemory = ClientUtils.getPhysicalMemorySize(this.pid) - this.grantedMemorySize;
-			int releasedBuffers = 0;
-			kilobytesUntilNextCheck = 0;
-			while (true) {
+			// Check if we have exceed the granted memory share with our previous allocations
+			int excessMemory = ClientUtils.getPhysicalMemorySize(this.pid) - grantedMemoryShare;
 
-				if (kilobytesUntilNextCheck <= 0) {
-					if (ClientUtils.getPhysicalMemorySize(this.pid) < this.grantedMemorySize) {
+			if (excessMemory > 0) {
+
+				while (excessMemory > 0) {
+
+					if (this.buffers.isEmpty()) {
+						Log.error(this.name + ": No more buffers to release");
 						break;
 					}
-					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
+
+					final T buffer = this.buffers.poll();
+					final int sizeOfBuffer = getSizeOfBuffer(buffer);
+					this.allocatedMemory.addAndGet(-sizeOfBuffer);
+					this.availableMemory.addAndGet(-sizeOfBuffer);
+					excessMemory -= sizeOfBuffer;
+					kilobytesUntilNextCheck -= sizeOfBuffer;
+					++releasedBuffers;
+
 				}
+				Log.info("Suggesting garbage collection");
+				System.gc();
+			}
+
+			// If we still consume too much memory, further release buffers and call System.gc every
+			// ADAPTATION_GRUNLARITY kilobytes
+			kilobytesUntilNextCheck = 0;
+			while (true) {
 
 				if (this.buffers.isEmpty()) {
 					Log.error(this.name + ": No more buffers to release");
 					break;
 				}
 
+				if (kilobytesUntilNextCheck <= 0) {
+					excessMemory = ClientUtils.getPhysicalMemorySize(this.pid) - grantedMemoryShare;
+					if (excessMemory <= 0) {
+						break;
+					}
+
+					Log.info("Suggesting garbage collection");
+					System.gc();
+					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
+				}
+
 				final T buffer = this.buffers.poll();
 				final int sizeOfBuffer = getSizeOfBuffer(buffer);
 				this.allocatedMemory.addAndGet(-sizeOfBuffer);
-				availableMemory = this.availableMemory.addAndGet(-sizeOfBuffer);
-				excessMemory -= sizeOfBuffer;
+				this.availableMemory.addAndGet(-sizeOfBuffer);
 				kilobytesUntilNextCheck -= sizeOfBuffer;
 				++releasedBuffers;
-
-				if (excessMemory < 0) {
-					Log.info("Requesting garbage collection");
-					System.gc();
-					excessMemory = ClientUtils.getPhysicalMemorySize(this.pid) - this.grantedMemorySize;
-					if (excessMemory < 0) {
-						break;
-					}
-				}
-			}
-
-			// Construct the debug message
-			if (Log.INFO) {
-				final StringBuilder sb = new StringBuilder();
-				sb.append(this.name);
-				sb.append(": Allocated ");
-				sb.append(allocatedBuffers);
-				sb.append(" buffers, ");
-				sb.append(" released ");
-				sb.append(releasedBuffers);
-				sb.append(" buffers, ");
-				sb.append(this.allocatedMemory.get() - oldAllocatedMemory);
-				sb.append(" kilobytes, ");
-				sb.append(this.buffers.size());
-				sb.append(" buffers available");
-
-				Log.info(sb.toString());
 			}
 		}
+
+		// Construct the debug message
+		if (Log.INFO) {
+			final StringBuilder sb = new StringBuilder();
+			sb.append(this.name);
+			sb.append(": Allocated ");
+			sb.append(allocatedBuffers);
+			sb.append(" buffers, ");
+			sb.append(" released ");
+			sb.append(releasedBuffers);
+			sb.append(" buffers, ");
+			sb.append(this.buffers.size());
+			sb.append(" buffers available (operation took ");
+			sb.append(System.currentTimeMillis() - start);
+			sb.append(" ms)");
+
+			Log.info(sb.toString());
+		}
+
+		final int availableMemory = this.availableMemory.get();
 
 		if (availableMemory > this.lowMemoryThreshold) {
 			this.lowMemoryNotificationSent.set(false);
