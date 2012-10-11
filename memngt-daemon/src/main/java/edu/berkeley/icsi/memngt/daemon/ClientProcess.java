@@ -58,8 +58,25 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 		return this.grantedMemoryShare;
 	}
 
-	void increaseGrantedMemoryShare(final int amountOfAdditionalMemory) {
-		this.grantedMemoryShare += amountOfAdditionalMemory;
+	void increaseGrantedMemoryShare(final int amountOfMemory) {
+
+		if (amountOfMemory < 0) {
+			throw new IllegalStateException("amountOfAdditionalMemory not be non-negative");
+		}
+
+		this.grantedMemoryShare += amountOfMemory;
+	}
+
+	void decreaseGrantedMemoryShare(final int amountOfMemory) {
+
+		if (amountOfMemory < 0) {
+			throw new IllegalStateException("amountOfAdditionalMemory not be non-negative");
+		}
+
+		this.grantedMemoryShare -= amountOfMemory;
+		if (this.grantedMemoryShare < this.guaranteedMemoryShare) {
+			this.grantedMemoryShare = this.guaranteedMemoryShare;
+		}
 	}
 
 	int getPhysicalMemorySize() {

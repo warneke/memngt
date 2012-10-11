@@ -112,7 +112,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 			final Iterator<ClientProcess> it = this.infrastructureProcesses.iterator();
 
-			int freeMemory = subtraceGraceMargin(Utils.getFreePhysicalMemory());
+			int freeMemory = subtractGraceMargin(Utils.getFreePhysicalMemory());
 
 			while (it.hasNext()) {
 
@@ -241,7 +241,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		}
 
 		clientProcess = new ClientProcess(clientName, clientPID, type, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
-			subtraceGraceMargin(Utils.getFreePhysicalMemory())));
+			subtractGraceMargin(Utils.getFreePhysicalMemory())));
 
 		this.clientProcesses.put(pid, clientProcess);
 		addToPriorityQueue(clientProcess);
@@ -264,9 +264,22 @@ public final class Daemon implements ClientToDaemonProtocol {
 		final Integer pid = Integer.valueOf(clientPID);
 		final ClientProcess clientProcess = this.clientProcesses.get(pid);
 
-		if (amountOfMemory < subtraceGraceMargin(Utils.getFreePhysicalMemory())) {
+		if (clientProcess == null) {
+			Log.error("Cannot find process with ID " + clientPID);
+			return false;
+		}
+
+		if (amountOfMemory < subtractGraceMargin(Utils.getFreePhysicalMemory())) {
 			clientProcess.increaseGrantedMemoryShare(amountOfMemory);
 			return true;
+		}
+
+		// Check if we can ask for the memory from an infrastructure process
+		int reclaimedMemory = 0;
+		final Iterator<ClientProcess> it = this.infrastructureProcesses.iterator();
+		while (it.hasNext()) {
+			final ClientProcess process = it.next();
+			System.out.println(process);
 		}
 
 		return false;
@@ -278,7 +291,18 @@ public final class Daemon implements ClientToDaemonProtocol {
 	@Override
 	public synchronized void relinquishMemory(final int clientPID, final int amountOfMemory) throws IOException {
 
-		// TODO: Implement me
+		Log.debug("Process with ID " + clientPID + " relinquishes " + amountOfMemory
+			+ " kilobytes of additional memory");
+
+		final Integer pid = Integer.valueOf(clientPID);
+		final ClientProcess clientProcess = this.clientProcesses.get(pid);
+
+		if (clientProcess == null) {
+			Log.error("Cannot find process with ID " + clientPID);
+			return;
+		}
+
+		clientProcess.decreaseGrantedMemoryShare(amountOfMemory);
 	}
 
 	private static int addGraceMargin(final int amountOfMemory) {
@@ -286,7 +310,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		return amountOfMemory + Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}
 
-	private static int subtraceGraceMargin(final int amountOfMemory) {
+	private static int subtractGraceMargin(final int amountOfMemory) {
 
 		return amountOfMemory - Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}

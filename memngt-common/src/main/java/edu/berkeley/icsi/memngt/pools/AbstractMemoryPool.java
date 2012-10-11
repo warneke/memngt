@@ -17,6 +17,8 @@ public abstract class AbstractMemoryPool<T> {
 
 	private final int pid;
 
+	private final int bufferSize;
+
 	private final BlockingQueue<T> buffers;
 
 	private final Object adjustmentLock = new Object();
@@ -53,17 +55,19 @@ public abstract class AbstractMemoryPool<T> {
 	 */
 	private final float heapResizeLimit;
 
-	protected AbstractMemoryPool(final String name, final int initialCapacity) {
+	protected AbstractMemoryPool(final String name, final int initialCapacity, final int bufferSize) {
 		this.name = name;
 		this.pid = ClientUtils.getPID();
+		this.bufferSize = bufferSize;
 		this.buffers = new ArrayBlockingQueue<T>(initialCapacity);
 		this.heapResizeLimit = (100 - ClientUtils.getMinHeapFreeRatio()) / 100.0f;
 	}
 
-	protected AbstractMemoryPool(final int initialCapacity) {
+	protected AbstractMemoryPool(final int initialCapacity, final int bufferSize) {
 		final int pid = ClientUtils.getPID();
 		this.name = getDefaultName(pid);
 		this.pid = pid;
+		this.bufferSize = bufferSize;
 		this.buffers = new ArrayBlockingQueue<T>(initialCapacity);
 		this.heapResizeLimit = (100 - ClientUtils.getMinHeapFreeRatio()) / 100.0f;
 	}
@@ -80,13 +84,21 @@ public abstract class AbstractMemoryPool<T> {
 	}
 
 	/**
-	 * The granted memory size in kilobytes.
+	 * Returns the granted memory size in kilobytes.
 	 * 
 	 * @return the granted memory size in kilobytes
 	 */
 	public int getGrantedMemorySize() {
-
 		return this.grantedMemorySize.get();
+	}
+
+	/**
+	 * Returns the amount of available memory in kilobytes.
+	 * 
+	 * @return the amount of available memory in kilobytes
+	 */
+	public int getAvailableMemory() {
+		return this.availableMemory.get();
 	}
 
 	/**
@@ -155,6 +167,8 @@ public abstract class AbstractMemoryPool<T> {
 			return;
 		}
 
+		final int sizeOfBuffer = this.bufferSize;
+
 		final long start = System.currentTimeMillis();
 
 		final int grantedMemoryShare = this.grantedMemorySize.addAndGet(delta);
@@ -185,7 +199,6 @@ public abstract class AbstractMemoryPool<T> {
 				}
 
 				final T buffer = allocatedNewBuffer();
-				final int sizeOfBuffer = getSizeOfBuffer(buffer);
 				this.buffers.add(buffer);
 				this.allocatedMemory.addAndGet(sizeOfBuffer);
 				this.availableMemory.addAndGet(sizeOfBuffer);
@@ -205,8 +218,7 @@ public abstract class AbstractMemoryPool<T> {
 						break;
 					}
 
-					final T buffer = this.buffers.poll();
-					final int sizeOfBuffer = getSizeOfBuffer(buffer);
+					this.buffers.poll();
 					this.allocatedMemory.addAndGet(-sizeOfBuffer);
 					this.availableMemory.addAndGet(-sizeOfBuffer);
 					excessMemory -= sizeOfBuffer;
@@ -239,8 +251,7 @@ public abstract class AbstractMemoryPool<T> {
 					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
 				}
 
-				final T buffer = this.buffers.poll();
-				final int sizeOfBuffer = getSizeOfBuffer(buffer);
+				this.buffers.poll();
 				this.allocatedMemory.addAndGet(-sizeOfBuffer);
 				this.availableMemory.addAndGet(-sizeOfBuffer);
 				kilobytesUntilNextCheck -= sizeOfBuffer;
@@ -297,7 +308,7 @@ public abstract class AbstractMemoryPool<T> {
 			return null;
 		}
 
-		final int availableMemory = this.availableMemory.addAndGet(-getSizeOfBuffer(buffer));
+		final int availableMemory = this.availableMemory.addAndGet(-this.bufferSize);
 
 		if (availableMemory < this.highMemoryThreshold) {
 			this.highMemoryNotificationSent.set(false);
@@ -321,7 +332,7 @@ public abstract class AbstractMemoryPool<T> {
 	public void returnBuffer(final T buffer) {
 
 		// Make sure we update available memory before putting the buffer back to the queue
-		final int availableMemory = this.availableMemory.addAndGet(getSizeOfBuffer(buffer));
+		final int availableMemory = this.availableMemory.addAndGet(this.bufferSize);
 		this.buffers.add(buffer);
 
 		if (availableMemory > this.lowMemoryThreshold) {
@@ -335,19 +346,39 @@ public abstract class AbstractMemoryPool<T> {
 		}
 	}
 
+	public int relinquishMemory(final int minimumAmountToRelinquish, final int minimumAmountToPreserve) {
+
+		while (true) {
+
+			final int availableMemory = this.availableMemory.get();
+
+			int amountToRelinquish = availableMemory - minimumAmountToPreserve;
+			// Make sure amount to relinquish is a multiple of the buffer size
+			amountToRelinquish = (amountToRelinquish / this.bufferSize) * this.bufferSize;
+
+			if (amountToRelinquish < minimumAmountToRelinquish) {
+				return 0;
+			}
+
+			if (!this.availableMemory.compareAndSet(availableMemory, availableMemory - amountToRelinquish)) {
+				// We had a race, try again
+				continue;
+			}
+
+			int i = 0;
+			while (i < amountToRelinquish) {
+				this.buffers.poll();
+				i += this.bufferSize;
+			}
+
+			return amountToRelinquish;
+		}
+	}
+
 	/**
 	 * Allocates a new buffer to be added to the memory pool.
 	 * 
 	 * @return the newly allocated buffer
 	 */
 	protected abstract T allocatedNewBuffer();
-
-	/**
-	 * Returns the size of the provided buffer in kilobytes.
-	 * 
-	 * @param buffer
-	 *        the buffer to determine the size of
-	 * @return the size of the provided buffer in kilobytes
-	 */
-	protected abstract int getSizeOfBuffer(T buffer);
 }
