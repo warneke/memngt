@@ -28,6 +28,16 @@ public final class ClientUtils {
 	private static final String REQUIRED_SPEC_VENDOR = "Sun Microsystems Inc.";
 
 	/**
+	 * The default value of the MinHeapFreeRatio JVM parameter.
+	 */
+	private static final int DEFAULT_JVM_MIN_HEAP_FREE_RATIO = 40;
+
+	/**
+	 * The default value of the MaxHeapFreeRatio JVM parameter.
+	 */
+	private static final int DEFAULT_JVM_MAX_HEAP_FREE_RATIO = 70;
+
+	/**
 	 * Regular expression to match the MinHeapFreeRatio parameter of the JVM.
 	 */
 	private static final Pattern JVM_MIN_HEAP_FREE_RATIO = Pattern.compile("-XX:MinHeapFreeRatio=(\\d+)");
@@ -173,13 +183,13 @@ public final class ClientUtils {
 	/**
 	 * Returns the value of the MaxHeapFreeRatio parameter passed to the JVM at startup.
 	 * 
-	 * @return the value of MaxHeapFreeRatio parameter or <code>-1</code> if no such parameter exists
+	 * @return the value of MaxHeapFreeRatio parameter
 	 */
 	public static int getMaxHeapFreeRatio() {
 
 		final String val = getValueOfJVMParameter(JVM_MAX_HEAP_FREE_RATIO);
 		if (val == null) {
-			return -1;
+			return DEFAULT_JVM_MAX_HEAP_FREE_RATIO;
 		}
 
 		return Integer.parseInt(val);
@@ -188,13 +198,13 @@ public final class ClientUtils {
 	/**
 	 * Returns the value of the MinHeapFreeRatio parameter passed to the JVM at startup.
 	 * 
-	 * @return the value of MinHeapFreeRatio parameter or <code>-1</code> if no such parameter exists
+	 * @return the value of MinHeapFreeRatio parameter
 	 */
 	public static int getMinHeapFreeRatio() {
 
 		final String val = getValueOfJVMParameter(JVM_MIN_HEAP_FREE_RATIO);
 		if (val == null) {
-			return -1;
+			return DEFAULT_JVM_MIN_HEAP_FREE_RATIO;
 		}
 
 		return Integer.parseInt(val);
