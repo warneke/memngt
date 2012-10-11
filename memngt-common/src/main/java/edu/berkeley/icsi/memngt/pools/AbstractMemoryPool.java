@@ -198,10 +198,8 @@ public abstract class AbstractMemoryPool<T> {
 					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
 				}
 
-				final T buffer = allocatedNewBuffer();
-				this.buffers.add(buffer);
+				returnBufferInternal(allocatedNewBuffer(), false);
 				this.allocatedMemory.addAndGet(sizeOfBuffer);
-				this.availableMemory.addAndGet(sizeOfBuffer);
 				kilobytesUntilNextCheck -= sizeOfBuffer;
 				++allocatedBuffers;
 			}
@@ -213,14 +211,12 @@ public abstract class AbstractMemoryPool<T> {
 
 				while (excessMemory > 0) {
 
-					if (this.buffers.isEmpty()) {
+					if (requestBufferInternal(false) == null) {
 						Log.error(this.name + ": No more buffers to release");
 						break;
 					}
 
-					this.buffers.poll();
 					this.allocatedMemory.addAndGet(-sizeOfBuffer);
-					this.availableMemory.addAndGet(-sizeOfBuffer);
 					excessMemory -= sizeOfBuffer;
 					kilobytesUntilNextCheck -= sizeOfBuffer;
 					++releasedBuffers;
@@ -235,11 +231,6 @@ public abstract class AbstractMemoryPool<T> {
 			kilobytesUntilNextCheck = 0;
 			while (true) {
 
-				if (this.buffers.isEmpty()) {
-					Log.error(this.name + ": No more buffers to release");
-					break;
-				}
-
 				if (kilobytesUntilNextCheck <= 0) {
 					excessMemory = ClientUtils.getPhysicalMemorySize(this.pid) - grantedMemoryShare;
 					if (excessMemory <= 0) {
@@ -251,9 +242,12 @@ public abstract class AbstractMemoryPool<T> {
 					kilobytesUntilNextCheck = ADAPTATION_GRANULARITY;
 				}
 
-				this.buffers.poll();
+				if (requestBufferInternal(false) == null) {
+					Log.error(this.name + ": No more buffers to release");
+					break;
+				}
+
 				this.allocatedMemory.addAndGet(-sizeOfBuffer);
-				this.availableMemory.addAndGet(-sizeOfBuffer);
 				kilobytesUntilNextCheck -= sizeOfBuffer;
 				++releasedBuffers;
 			}
@@ -277,7 +271,10 @@ public abstract class AbstractMemoryPool<T> {
 			Log.info(sb.toString());
 		}
 
-		final int availableMemory = this.availableMemory.get();
+		checkThresholds(this.availableMemory.get());
+	}
+
+	private void checkThresholds(final int availableMemory) {
 
 		if (availableMemory > this.lowMemoryThreshold) {
 			this.lowMemoryNotificationSent.set(false);
@@ -296,27 +293,39 @@ public abstract class AbstractMemoryPool<T> {
 		}
 	}
 
-	/**
-	 * Requests a buffer from the memory pool.
-	 * 
-	 * @return a buffer from the memory pool or <code>null</code> if no buffer is available
-	 */
-	public T requestBuffer() {
+	private T requestBufferInternal(final boolean checkThreshold) {
+
+		int newAvailableMemory;
+		while (true) {
+
+			final int availableMemory = this.availableMemory.get();
+			if (availableMemory == 0) {
+				return null;
+			}
+
+			newAvailableMemory = availableMemory - this.bufferSize;
+			if (this.availableMemory.compareAndSet(availableMemory, newAvailableMemory)) {
+				break;
+			}
+
+			// We had a race, try again
+		}
 
 		final T buffer = this.buffers.poll();
 		if (buffer == null) {
-			return null;
+			throw new IllegalStateException("There must be a race condition somewhere");
 		}
 
-		final int availableMemory = this.availableMemory.addAndGet(-this.bufferSize);
+		if (checkThreshold) {
 
-		if (availableMemory < this.highMemoryThreshold) {
-			this.highMemoryNotificationSent.set(false);
-		}
+			if (newAvailableMemory < this.highMemoryThreshold) {
+				this.highMemoryNotificationSent.set(false);
+			}
 
-		if (availableMemory < this.lowMemoryThreshold) {
-			if (this.lowMemoryNotificationSent.compareAndSet(false, true)) {
-				this.lowMemoryListener.indicateLowMemory(availableMemory);
+			if (newAvailableMemory < this.lowMemoryThreshold) {
+				if (this.lowMemoryNotificationSent.compareAndSet(false, true)) {
+					this.lowMemoryListener.indicateLowMemory(newAvailableMemory);
+				}
 			}
 		}
 
@@ -324,16 +333,22 @@ public abstract class AbstractMemoryPool<T> {
 	}
 
 	/**
-	 * Returns a previously removed buffer back to the memory pool.
+	 * Requests a buffer from the memory pool.
 	 * 
-	 * @param buffer
-	 *        the buffer to return to the pool
+	 * @return a buffer from the memory pool or <code>null</code> if no buffer is available
 	 */
-	public void returnBuffer(final T buffer) {
+	public T requestBuffer() {
+		return requestBufferInternal(true);
+	}
 
-		// Make sure we update available memory before putting the buffer back to the queue
-		final int availableMemory = this.availableMemory.addAndGet(this.bufferSize);
+	private void returnBufferInternal(final T buffer, final boolean checkThreshold) {
+
 		this.buffers.add(buffer);
+		final int availableMemory = this.availableMemory.addAndGet(this.bufferSize);
+
+		if (availableMemory <= 0) {
+			throw new IllegalStateException("There must be a race condition somewhere");
+		}
 
 		if (availableMemory > this.lowMemoryThreshold) {
 			this.lowMemoryNotificationSent.set(false);
@@ -346,8 +361,19 @@ public abstract class AbstractMemoryPool<T> {
 		}
 	}
 
+	/**
+	 * Returns a previously removed buffer back to the memory pool.
+	 * 
+	 * @param buffer
+	 *        the buffer to return to the pool
+	 */
+	public void returnBuffer(final T buffer) {
+		returnBufferInternal(buffer, true);
+	}
+
 	public int relinquishMemory(final int minimumAmountToRelinquish, final int minimumAmountToPreserve) {
 
+		int newAvailableMemory;
 		while (true) {
 
 			final int availableMemory = this.availableMemory.get();
@@ -360,7 +386,8 @@ public abstract class AbstractMemoryPool<T> {
 				return 0;
 			}
 
-			if (!this.availableMemory.compareAndSet(availableMemory, availableMemory - amountToRelinquish)) {
+			newAvailableMemory = availableMemory - amountToRelinquish;
+			if (!this.availableMemory.compareAndSet(availableMemory, newAvailableMemory)) {
 				// We had a race, try again
 				continue;
 			}
@@ -370,6 +397,8 @@ public abstract class AbstractMemoryPool<T> {
 				this.buffers.poll();
 				i += this.bufferSize;
 			}
+
+			checkThresholds(newAvailableMemory);
 
 			return amountToRelinquish;
 		}
