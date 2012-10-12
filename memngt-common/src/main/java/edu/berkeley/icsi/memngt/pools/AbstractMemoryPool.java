@@ -127,6 +127,15 @@ public abstract class AbstractMemoryPool<T> {
 	}
 
 	/**
+	 * Returns the size of a single buffer from this pool in bytes;
+	 * 
+	 * @return the size of a single buffer from this pool in bytes
+	 */
+	public int getBufferSize() {
+		return this.bufferSize * 1024;
+	}
+
+	/**
 	 * Sets the low memory listener for this memory pool. The listener is notified when the amount of memory available
 	 * in this pool falls below the specified threshold.
 	 * 
