@@ -117,12 +117,21 @@ public final class Daemon implements ClientToDaemonProtocol {
 			while (it.hasNext()) {
 
 				final ClientProcess clientProcess = it.next();
+
+				// Check if process is interested in memory offers
+				if (!clientProcess.getOfferFreeMemory()) {
+					continue;
+				}
+
 				Log.info("Offering " + freeMemory + " kilobytes of additional memory to " + clientProcess);
 				try {
 					final int acceptedMemory = clientProcess.additionalMemoryOffered(freeMemory);
 					if (acceptedMemory > 0) {
 						Log.info(clientProcess + " accepted " + acceptedMemory + " kilobytes of additional memory");
 						clientProcess.increaseGrantedMemoryShare(acceptedMemory);
+					} else if (acceptedMemory < 0) {
+						Log.info(clientProcess + " indicated not to be intersted in further memory offers");
+						clientProcess.setOfferFreeMemory(false);
 					}
 				} catch (IOException ioe) {
 					Log.warn("I/O error while offering additional memory to " + clientProcess
@@ -259,7 +268,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 	public synchronized boolean requestAdditionalMemory(final int clientPID, final int amountOfMemory)
 			throws IOException {
 
-		Log.debug("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
+		Log.info("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
 
 		final Integer pid = Integer.valueOf(clientPID);
 		final ClientProcess clientProcess = this.clientProcesses.get(pid);
@@ -291,7 +300,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 	@Override
 	public synchronized void relinquishMemory(final int clientPID, final int amountOfMemory) throws IOException {
 
-		Log.debug("Process with ID " + clientPID + " relinquishes " + amountOfMemory
+		Log.info("Process with ID " + clientPID + " relinquishes " + amountOfMemory
 			+ " kilobytes of additional memory");
 
 		final Integer pid = Integer.valueOf(clientPID);
