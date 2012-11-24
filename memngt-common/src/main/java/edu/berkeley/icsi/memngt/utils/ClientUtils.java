@@ -7,15 +7,49 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryUsage;
+import java.lang.management.RuntimeMXBean;
 import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.esotericsoftware.minlog.Log;
 
 public final class ClientUtils {
 
-	private static final int PAGE_SIZE = 4;
+	/**
+	 * The assumed page size in kilobytes.
+	 */
+	private static final int PAGE_SIZE = 4; // TODO; Detect this automatically.
 
+	/**
+	 * The required Java virtual machine specification vendor.
+	 */
+	private static final String REQUIRED_SPEC_VENDOR = "Sun Microsystems Inc.";
+
+	/**
+	 * The default value of the MinHeapFreeRatio JVM parameter.
+	 */
+	private static final int DEFAULT_JVM_MIN_HEAP_FREE_RATIO = 40;
+
+	/**
+	 * The default value of the MaxHeapFreeRatio JVM parameter.
+	 */
+	private static final int DEFAULT_JVM_MAX_HEAP_FREE_RATIO = 70;
+
+	/**
+	 * Regular expression to match the MinHeapFreeRatio parameter of the JVM.
+	 */
+	private static final Pattern JVM_MIN_HEAP_FREE_RATIO = Pattern.compile("-XX:MinHeapFreeRatio=(\\d+)");
+
+	/**
+	 * Regular expression to match the MaxHeapFreeRatio parameter of the JVM.
+	 */
+	private static final Pattern JVM_MAX_HEAP_FREE_RATIO = Pattern.compile("-XX:MaxHeapFreeRatio=(\\d+)");
+
+	/**
+	 * Private constructor to prevent instantiation.
+	 */
 	private ClientUtils() {
 	}
 
@@ -47,6 +81,14 @@ public final class ClientUtils {
 		}
 	}
 
+	/**
+	 * Returns the physical memory size for the process with the given ID as observed by the operating system.
+	 * 
+	 * @param pid
+	 *        the ID of the process
+	 * @return the physical memory size of the process in kilobytes or <code>-1</code> if the memory size could not be
+	 *         determined
+	 */
 	public static int getPhysicalMemorySize(final int pid) {
 
 		final String filename = "/proc/" + pid + "/statm";
@@ -88,6 +130,25 @@ public final class ClientUtils {
 		}
 	}
 
+	/**
+	 * Returns the maximum amount of memory in kilobytes that can be used for memory management.
+	 * 
+	 * @return the maximum amount of memory in kilobytes that can be used for memory management or <code>-1</code> if
+	 *         the value could not be determined
+	 */
+	public static int getMaximumUsableMemory() {
+
+		final long maxHeap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
+		if (maxHeap == -1L) {
+			return -1;
+		}
+
+		return (int) (maxHeap / 1024L);
+	}
+
+	/**
+	 * Dumps the current memory utilization, broken down into the different memory pools, to stdout.
+	 */
 	public static void dumpMemoryUtilization() {
 
 		System.out.println("-------- Memory Pools --------");
@@ -119,6 +180,95 @@ public final class ClientUtils {
 		System.out.println(sb.toString());
 	}
 
+	/**
+	 * Returns the value of the MaxHeapFreeRatio parameter passed to the JVM at startup.
+	 * 
+	 * @return the value of MaxHeapFreeRatio parameter
+	 */
+	public static int getMaxHeapFreeRatio() {
+
+		final String val = getValueOfJVMParameter(JVM_MAX_HEAP_FREE_RATIO);
+		if (val == null) {
+			return DEFAULT_JVM_MAX_HEAP_FREE_RATIO;
+		}
+
+		return Integer.parseInt(val);
+	}
+
+	/**
+	 * Returns the value of the MinHeapFreeRatio parameter passed to the JVM at startup.
+	 * 
+	 * @return the value of MinHeapFreeRatio parameter
+	 */
+	public static int getMinHeapFreeRatio() {
+
+		final String val = getValueOfJVMParameter(JVM_MIN_HEAP_FREE_RATIO);
+		if (val == null) {
+			return DEFAULT_JVM_MIN_HEAP_FREE_RATIO;
+		}
+
+		return Integer.parseInt(val);
+
+	}
+
+	/**
+	 * Auxiliary method to parse the arguments passed to JVM at startup and extract values from these arguments by means
+	 * of a regular expression.
+	 * 
+	 * @param parameter
+	 *        the regular expression to apply to the arguments
+	 * @return the first value extracted from the first matching argument
+	 */
+	private static String getValueOfJVMParameter(final Pattern parameter) {
+
+		final RuntimeMXBean runtimeMXBean = ManagementFactory.getRuntimeMXBean();
+		final Iterator<String> it = runtimeMXBean.getInputArguments().iterator();
+		while (it.hasNext()) {
+			final Matcher matcher = parameter.matcher(it.next());
+			if (matcher.matches()) {
+				return matcher.group(1);
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Checks if the JVM meets all requirements to work with the memory negotiator service. If any requirement is not
+	 * met a runtime exception is thrown.
+	 */
+	public static void checkCompatibility() {
+
+		final RuntimeMXBean runtimeMXBean = ManagementFactory.getRuntimeMXBean();
+		if (runtimeMXBean == null) {
+			throw new RuntimeException(
+				"Your JVM does not support the RuntimeMXBean which is required by the memory negotiation service");
+		}
+
+		// Make sure we are running on a HotSpot JVM
+		if (!REQUIRED_SPEC_VENDOR.equals(runtimeMXBean.getSpecVendor())) {
+			throw new RuntimeException("Please make sure you execute this program on a Sun/Oracle HotSpot JVM");
+		}
+
+		if (getMaximumUsableMemory() == -1) {
+			throw new RuntimeException(
+				"Cannot determine the maximum amount of memory that is available for memory management");
+		}
+
+		// Check correctness with regard to operating system interaction
+		final int pid = getPID();
+		if (pid == -1) {
+			throw new RuntimeException("The JVM is unable to determine its operating system process ID");
+		}
+	}
+
+	/**
+	 * Auxiliary method to convert bytes into megabytes.
+	 * 
+	 * @param val
+	 *        the value in bytes
+	 * @return the value converted from bytes to megabytes
+	 */
 	private static int byteToMegaByte(final long val) {
 
 		return (int) (val / 1048576L);

@@ -15,6 +15,7 @@ import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
 import edu.berkeley.icsi.memngt.protocols.NegotiationException;
 import edu.berkeley.icsi.memngt.protocols.ProcessType;
 import edu.berkeley.icsi.memngt.rpc.RPCService;
+import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
 public final class Daemon implements ClientToDaemonProtocol {
 
@@ -111,14 +112,27 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 			final Iterator<ClientProcess> it = this.infrastructureProcesses.iterator();
 
-			int freeMemory = subtraceGraceMargin(Utils.getFreePhysicalMemory());
+			int freeMemory = subtractGraceMargin(Utils.getFreePhysicalMemory());
 
 			while (it.hasNext()) {
 
 				final ClientProcess clientProcess = it.next();
+
+				// Check if process is interested in memory offers
+				if (!clientProcess.getOfferFreeMemory()) {
+					continue;
+				}
+
 				Log.info("Offering " + freeMemory + " kilobytes of additional memory to " + clientProcess);
 				try {
 					final int acceptedMemory = clientProcess.additionalMemoryOffered(freeMemory);
+					if (acceptedMemory > 0) {
+						Log.info(clientProcess + " accepted " + acceptedMemory + " kilobytes of additional memory");
+						clientProcess.increaseGrantedMemoryShare(acceptedMemory);
+					} else if (acceptedMemory < 0) {
+						Log.info(clientProcess + " indicated not to be intersted in further memory offers");
+						clientProcess.setOfferFreeMemory(false);
+					}
 				} catch (IOException ioe) {
 					Log.warn("I/O error while offering additional memory to " + clientProcess
 						+ "...", ioe);
@@ -184,11 +198,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	public static void main(final String[] args) {
 
-		// Do some initial sanity checks
-		if (Utils.getFreePhysicalMemory() == -1) {
-			Log.error("Cannot determine the amount of free physical memory");
-			return;
-		}
+		// Do some initial compatibility checks
+		ClientUtils.checkCompatibility();
 
 		Daemon daemon = null;
 		try {
@@ -239,7 +250,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		}
 
 		clientProcess = new ClientProcess(clientName, clientPID, type, rpcProxy, Math.min(MINIMUM_CLIENT_MEMORY,
-			subtraceGraceMargin(Utils.getFreePhysicalMemory())));
+			subtractGraceMargin(Utils.getFreePhysicalMemory())));
 
 		this.clientProcesses.put(pid, clientProcess);
 		addToPriorityQueue(clientProcess);
@@ -258,13 +269,26 @@ public final class Daemon implements ClientToDaemonProtocol {
 			throws IOException {
 
 		Log.info("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
-		
+
 		final Integer pid = Integer.valueOf(clientPID);
 		final ClientProcess clientProcess = this.clientProcesses.get(pid);
 
-		if (amountOfMemory < subtraceGraceMargin(Utils.getFreePhysicalMemory())) {
+		if (clientProcess == null) {
+			Log.error("Cannot find process with ID " + clientPID);
+			return false;
+		}
+
+		if (amountOfMemory < subtractGraceMargin(Utils.getFreePhysicalMemory())) {
 			clientProcess.increaseGrantedMemoryShare(amountOfMemory);
 			return true;
+		}
+
+		// Check if we can ask for the memory from an infrastructure process
+		int reclaimedMemory = 0;
+		final Iterator<ClientProcess> it = this.infrastructureProcesses.iterator();
+		while (it.hasNext()) {
+			final ClientProcess process = it.next();
+			System.out.println(process);
 		}
 
 		return false;
@@ -276,7 +300,18 @@ public final class Daemon implements ClientToDaemonProtocol {
 	@Override
 	public synchronized void relinquishMemory(final int clientPID, final int amountOfMemory) throws IOException {
 
-		// TODO: Implement me
+		Log.info("Process with ID " + clientPID + " relinquishes " + amountOfMemory
+			+ " kilobytes of additional memory");
+
+		final Integer pid = Integer.valueOf(clientPID);
+		final ClientProcess clientProcess = this.clientProcesses.get(pid);
+
+		if (clientProcess == null) {
+			Log.error("Cannot find process with ID " + clientPID);
+			return;
+		}
+
+		clientProcess.decreaseGrantedMemoryShare(amountOfMemory);
 	}
 
 	private static int addGraceMargin(final int amountOfMemory) {
@@ -284,7 +319,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 		return amountOfMemory + Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}
 
-	private static int subtraceGraceMargin(final int amountOfMemory) {
+	private static int subtractGraceMargin(final int amountOfMemory) {
 
 		return amountOfMemory - Math.round((float) amountOfMemory * GRACE_MARGIN);
 	}

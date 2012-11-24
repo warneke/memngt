@@ -22,6 +22,11 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 
 	private int grantedMemoryShare;
 
+	/**
+	 * Stores if the process shall be offered free memory.
+	 */
+	private boolean offerFreeMemory;
+
 	ClientProcess(final String name, final int pid, final ProcessType type, final DaemonToClientProtocol rpcProxy,
 			final int guaranteedMemoryShare) {
 
@@ -32,6 +37,7 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 		this.rpcProxy = rpcProxy;
 		this.guaranteedMemoryShare = guaranteedMemoryShare;
 		this.grantedMemoryShare = guaranteedMemoryShare;
+		this.offerFreeMemory = (type == ProcessType.INFRASTRUCTURE_PROCESS);
 	}
 
 	String getName() {
@@ -58,12 +64,58 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 		return this.grantedMemoryShare;
 	}
 
-	void increaseGrantedMemoryShare(final int amountOfAdditionalMemory) {
-		this.grantedMemoryShare += amountOfAdditionalMemory;
+	void increaseGrantedMemoryShare(final int amountOfMemory) {
+
+		if (amountOfMemory < 0) {
+			throw new IllegalStateException("amountOfAdditionalMemory not be non-negative");
+		}
+
+		this.grantedMemoryShare += amountOfMemory;
+	}
+
+	void decreaseGrantedMemoryShare(final int amountOfMemory) {
+
+		if (amountOfMemory < 0) {
+			throw new IllegalStateException("amountOfAdditionalMemory not be non-negative");
+		}
+
+		this.grantedMemoryShare -= amountOfMemory;
+		if (this.grantedMemoryShare < this.guaranteedMemoryShare) {
+			this.grantedMemoryShare = this.guaranteedMemoryShare;
+		}
 	}
 
 	int getPhysicalMemorySize() {
 		return ClientUtils.getPhysicalMemorySize(this.pid);
+	}
+
+	/**
+	 * Sets if the process shall be offered free memory.
+	 * 
+	 * @param offerFreeMemory
+	 *        <code>true</code> to indicate the process shall be offered free memory, <code>false</code> otherwise
+	 */
+	void setOfferFreeMemory(final boolean offerFreeMemory) {
+
+		if (this.type == ProcessType.USER_PROCESS) {
+			throw new IllegalStateException("setOfferFreeMemory accessed for user process");
+		}
+
+		this.offerFreeMemory = offerFreeMemory;
+	}
+
+	/**
+	 * Returns if the process shall be offered free memory.
+	 * 
+	 * @return <code>true</code> if the process shall be offered free memory, <code>false</code> otherwise
+	 */
+	boolean getOfferFreeMemory() {
+
+		if (this.type == ProcessType.USER_PROCESS) {
+			throw new IllegalStateException("getOfferFreeMemory accessed for user process");
+		}
+
+		return this.offerFreeMemory;
 	}
 
 	/**
