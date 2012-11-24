@@ -3,7 +3,7 @@ package edu.berkeley.icsi.memngt.rpc;
 import java.io.IOException;
 import java.io.InputStream;
 
-final class MemoryBackedInputStream extends InputStream {
+final class SinglePacketInputStream extends InputStream {
 
 	private final byte[] buf;
 
@@ -11,10 +11,10 @@ final class MemoryBackedInputStream extends InputStream {
 
 	private int read;
 
-	MemoryBackedInputStream(final byte[] buf, final int off, final int len) {
+	SinglePacketInputStream(final byte[] buf, final int len) {
 
 		this.buf = buf;
-		this.read = off;
+		this.read = 0;
 		this.len = len;
 	}
 

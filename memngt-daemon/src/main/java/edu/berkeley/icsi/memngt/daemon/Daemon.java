@@ -38,7 +38,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private Daemon(final int rpcPort) throws IOException {
 
-		this.rpcService = new RPCService(rpcPort);
+		this.rpcService = new RPCService(rpcPort, 4, null);
 		this.rpcService.setProtocolCallbackHandler(
 			ClientToDaemonProtocol.class, this);
 
@@ -257,8 +257,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 	public synchronized boolean requestAdditionalMemory(final int clientPID, final int amountOfMemory)
 			throws IOException {
 
-		Log.debug("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
-
+		Log.info("Process with ID " + clientPID + " requests " + amountOfMemory + " kilobytes of additional memory");
+		
 		final Integer pid = Integer.valueOf(clientPID);
 		final ClientProcess clientProcess = this.clientProcesses.get(pid);
 
