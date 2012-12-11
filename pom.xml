@@ -90,5 +90,6 @@
 		<module>memngt-common</module>
 		<module>memngt-daemon</module>
 		<module>memngt-master</module>
+		<module>memngt-dist</module>
 	</modules>
 </project>
