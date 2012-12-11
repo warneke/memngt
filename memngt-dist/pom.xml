@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <artifactId>memngt</artifactId>
+    <groupId>edu.berkeley.icsi</groupId>
+    <version>0.1</version>
+  </parent>
+  <artifactId>memngt-dist</artifactId>
+  <name>memngt-dist</name>
+  <packaging>pom</packaging>
+  <dependencies>
+    <!-- BINARIES -->
+    <dependency>
+      <groupId>edu.berkeley.icsi</groupId>
+      <artifactId>memngt-common</artifactId>
+      <version>${version}</version>
+    </dependency>
+    <dependency>
+      <groupId>edu.berkeley.icsi</groupId>
+      <artifactId>memngt-daemon</artifactId>
+      <version>${version}</version>
+    </dependency>
+    <dependency>
+      <groupId>edu.berkeley.icsi</groupId>
+      <artifactId>memngt-master</artifactId>
+      <version>${version}</version>
+    </dependency>
+    <!--  SOURCES -->
+    <!--
+    	<dependency>
+          <groupId>eu.stratosphere</groupId>
+          <artifactId>pact</artifactId>
+          <version>${version}</version>
+		  <classifier>sources</classifier>
+        </dependency>
+        
+        <dependency>
+          <groupId>eu.stratosphere</groupId>
+          <artifactId>nephele</artifactId>
+          <version>${version}</version>
+		  <classifier>sources</classifier>
+        </dependency>
+        -->
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>generate-package</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <descriptors>
+            <descriptor>src/main/assemblies/bin.xml</descriptor>
+            <!--
+                        <descriptor>src/main/assemblies/src.xml</descriptor>
+                        -->
+          </descriptors>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
