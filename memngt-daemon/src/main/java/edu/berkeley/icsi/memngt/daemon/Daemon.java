@@ -14,6 +14,7 @@ import edu.berkeley.icsi.memngt.protocols.ClientToDaemonProtocol;
 import edu.berkeley.icsi.memngt.protocols.DaemonToClientProtocol;
 import edu.berkeley.icsi.memngt.protocols.NegotiationException;
 import edu.berkeley.icsi.memngt.protocols.ProcessType;
+import edu.berkeley.icsi.memngt.rpc.CommonTypeUtils;
 import edu.berkeley.icsi.memngt.rpc.RPCService;
 import edu.berkeley.icsi.memngt.utils.ClientUtils;
 
@@ -21,7 +22,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private static final int UPDATE_INTERVAL = 1000;
 
-	private static final int MINIMUM_CLIENT_MEMORY = 512 * 1024;
+	private static final int MINIMUM_CLIENT_MEMORY = 8 * 1024 * 1024;
 
 	/**
 	 * The fraction by which a client process may exceed its granted memory share before the memory negotiator daemon
@@ -39,7 +40,7 @@ public final class Daemon implements ClientToDaemonProtocol {
 
 	private Daemon(final int rpcPort) throws IOException {
 
-		this.rpcService = new RPCService(rpcPort, 4, null);
+		this.rpcService = new RPCService(rpcPort, 4, CommonTypeUtils.getRPCTypesToRegister());
 		this.rpcService.setProtocolCallbackHandler(
 			ClientToDaemonProtocol.class, this);
 
@@ -82,6 +83,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 					it.remove();
 					removeFromPriorityQueue(clientProcess);
 					continue;
+				} catch (InterruptedException ie) {
+					return;
 				}
 
 				physicalMemorySize = clientProcess.getPhysicalMemorySize();
@@ -96,9 +99,9 @@ public final class Daemon implements ClientToDaemonProtocol {
 				if (excessMemoryShare > 0) {
 					Log.info(clientProcess + " still exceeds its granted memory share by " + excessMemoryShare
 						+ " kilobytes, killing it...");
-					kill(clientProcess);
-					it.remove();
-					removeFromPriorityQueue(clientProcess);
+					//kill(clientProcess);
+					//it.remove();
+					//removeFromPriorityQueue(clientProcess);
 				} else {
 					Log.info(clientProcess + " reduced its physical memory consumption to " + physicalMemorySize);
 				}
@@ -137,6 +140,8 @@ public final class Daemon implements ClientToDaemonProtocol {
 					Log.warn("I/O error while offering additional memory to " + clientProcess
 						+ "...", ioe);
 					continue;
+				} catch (InterruptedException ie) {
+					return;
 				}
 
 			}

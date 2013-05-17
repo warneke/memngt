@@ -20,11 +20,13 @@ public interface ClientToDaemonProtocol extends RPCProtocol {
 	 * @return the initially granted memory share in kilobytes
 	 * @throws NegotiationException
 	 *         thrown if the daemon was unable to successfully complete the registration
+	 * @throws InterruptedException
+	 *         thrown if the caller was interrupted while waiting for the RPC call to return
 	 * @throws IOException
 	 *         thrown if an I/O error occurred during the RPC call
 	 */
 	int registerClient(String clientName, int clientPID, int clientRPCPort, ProcessType type)
-			throws NegotiationException, IOException;
+			throws NegotiationException, InterruptedException, IOException;
 
 	/**
 	 * Requests additional main memory for the client process with the given ID.
@@ -36,10 +38,13 @@ public interface ClientToDaemonProtocol extends RPCProtocol {
 	 * @return <code>true</code> if the memory negotiator daemon granted the request, <code>false</code> otherwise
 	 * @throws NegotiationException
 	 *         thrown if the daemon could not process the request for additional memory
+	 * @throws InterruptedException
+	 *         thrown if the caller was interrupted while waiting for the RPC call to return
 	 * @throws IOException
 	 *         thrown if an I/O error occurred during the RPC call
 	 */
-	boolean requestAdditionalMemory(int clientPID, int amountOfMemory) throws NegotiationException, IOException;
+	boolean requestAdditionalMemory(int clientPID, int amountOfMemory) throws NegotiationException,
+			InterruptedException, IOException;
 
 	/**
 	 * Relinquishes the given amount of main memory
@@ -48,10 +53,10 @@ public interface ClientToDaemonProtocol extends RPCProtocol {
 	 *        the process ID of the client relinquishing the memory
 	 * @param amountOfMemory
 	 *        the amount of relinquished memory in kilobytes
-	 * @throws NegotiationException
-	 *         thrown if the daemon could not process the client's relinquishment notification
+	 * @throws InterruptedException
+	 *         thrown if the caller was interrupted while waiting for the RPC call to return
 	 * @throws IOException
 	 *         thrown if an I/O error occurred during the RPC call
 	 */
-	void relinquishMemory(int clientPID, int amountOfMemory) throws IOException;
+	void relinquishMemory(int clientPID, int amountOfMemory) throws InterruptedException, IOException;
 }

@@ -130,7 +130,7 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 	 * {@inheritDoc}
 	 */
 	@Override
-	public void grantedMemoryShareChanged(final int sizeOfNewShare) throws IOException {
+	public void grantedMemoryShareChanged(final int sizeOfNewShare) throws InterruptedException, IOException {
 		this.rpcProxy.grantedMemoryShareChanged(sizeOfNewShare);
 	}
 
@@ -142,7 +142,7 @@ final class ClientProcess implements DaemonToClientProtocol, Comparable<ClientPr
 	 * {@inheritDoc}
 	 */
 	@Override
-	public int additionalMemoryOffered(final int amountOfAdditionalMemory) throws IOException {
+	public int additionalMemoryOffered(final int amountOfAdditionalMemory) throws InterruptedException, IOException {
 
 		if (this.type == ProcessType.USER_PROCESS) {
 			throw new IllegalStateException("Additional memory offered to user process");
